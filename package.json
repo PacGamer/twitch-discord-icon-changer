@@ -20,8 +20,10 @@
   "author": "pacgamer",
   "license": "ISC",
   "dependencies": {
-    "discord.js": "^11.1.0",
+    "bluebird": "^3.5.1",
+    "discord.js": "^11.3.0",
     "express": "^4.15.3",
+    "lodash": "^4.17.5",
     "tmi.js": "^1.2.1"
   }
 }

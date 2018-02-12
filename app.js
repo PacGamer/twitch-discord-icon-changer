@@ -1,35 +1,52 @@
 var fs = require("fs");
 var tmi = require("tmi.js");
+var _ = require('lodash');
+Promise = require('bluebird');
 const Discord = require('discord.js');
 const discordclient = new Discord.Client();
+
+//********************************
+// Authentication and config
+//********************************
 
 var DISCORD_CLIENT_LOGIN = "";
 var DISCORD_TARGET_GUILD_ID = "";
 
 var TWITCH_BOT_USERNAME = "";
-var TWITCH_BOT_OAUTH = "";
-var TWITCH_TARGET_CHANNEL = "";
+var TWITCH_BOT_PASSWORD = "";
 var TWITCH_APP_CLIENT_ID = "";
+var TWITCH_TARGET_CHANNEL = []; //One or more channels in format of an array. EX: ["twitch", "twitchpresents", "pacgamer"]
 
-discordclient.on('ready', () => {
-	console.log('I am ready!');
-});
+var CHECK_INTERVAL = "60000"; //Interval to check stream status, in milliseconds (1 second = 1000 milliseconds)
 
-// Connect the Discord client to the server
+//File locations
+var ICON_OFFLINE = fs.readFileSync('./offline.png');
+var ICON_ONLINE = fs.readFileSync('./online.png');
+
+//********************************
+// Do not edit below this line
+//********************************
+
+//Connect the Discord client to the server
 discordclient.login(DISCORD_CLIENT_LOGIN);
 
+discordclient.on('ready', () => {
+	console.log('Discord connection ready!');
+});
+
+//Configure Twitch options
 var options = {
 	options: {
-		debug: true
+		debug: false
 	},
 	connection: {
 		reconnect: true
 	},
 	identity: {
 		username: TWITCH_BOT_USERNAME,
-		password: TWITCH_BOT_OAUTH
+		password: TWITCH_BOT_PASSWORD
 	},
-	channels: ["#" + TWITCH_TARGET_CHANNEL]
+	channels: ["#" + TWITCH_BOT_USERNAME]
 };
 
 var twitchclient = new tmi.client(options);
@@ -38,55 +55,78 @@ var twitchclient = new tmi.client(options);
 twitchclient.connect();
 
 twitchclient.on("connected", function (address, port) {
-	streamStatus(TWITCH_TARGET_CHANNEL);
-	loop();
+	console.log('Twitch connection ready!');
 });
 
-function loop() {
-	setTimeout(function () {
-		loop();
-		streamStatus(TWITCH_TARGET_CHANNEL);
-	}, 60000);
+//Run main function every specified check interval
+setInterval(runChannels, CHECK_INTERVAL);
 
-};
+//Initialize last uploaded icon
+var lasticon = "default";
 
-var lasticon = "";
+//Nain function
+//Check status of each channel, upload new icon if necessary
+function runChannels() {
+	var promises = [];
 
-function streamStatus(channelname) {
-	twitchclient.api({
-		url: "https://api.twitch.tv/kraken/streams/" + channelname,
-		headers: {
-			"Client-ID": TWITCH_APP_CLIENT_ID
-		}
-	}, function (err, res, body) {
-		//console.log(body);
+	//Create promise for each channel
+	for (var i = 0, len = TWITCH_TARGET_CHANNEL.length; i < len; i++) {
 
-		if (body["stream"] == null) {
-			// Channel is OFFLINE
-			console.log("Channel is offline");
-			// Edit the guild icon
-			if (lasticon != "offline") {
-				discordclient.guilds.get(DISCORD_TARGET_GUILD_ID).setIcon(fs.readFileSync('./offline.png'))
-				.then(updated => console.log('Updated the guild icon'))
-				.catch (console.error);
+		//Add each promise to promise array
+		promises.push(new Promise(function (resolve, reject) {
+				var channelname = TWITCH_TARGET_CHANNEL[i];
+				//Check channel status
+				twitchclient.api({
+					url: "https://api.twitch.tv/kraken/streams/" + channelname,
+					headers: {
+						"Client-ID": TWITCH_APP_CLIENT_ID
+					}
+				}, function (err, res, body) {
 
-				lasticon = "offline";
-			};
+					if (body["stream"] == null) {
+						//Channel is OFFLINE
+						result = 'offline';
 
-		} else {
+					} else {
 
-			// Channel is ONLINE
-			console.log("Channel is online");
-			// Edit the guild icon
+						//Channel is ONLINE
+						result = 'online';
+
+					}
+
+					resolve(result);
+
+				})
+			}));
+	}
+
+	//Execute all promises in promise array
+	//results is an array of all the responses, in order
+	Promise.all(promises).then(function (results) {
+		//Check for any online channel
+		if (_.indexOf(results, 'online') != (-1)) {
+			//Upload online icon when necessary
 			if (lasticon != "online") {
-
-				discordclient.guilds.get(DISCORD_TARGET_GUILD_ID).setIcon(fs.readFileSync('./online.png'))
-				.then(updated => console.log('Updated the guild icon'))
+				discordclient.guilds.get(DISCORD_TARGET_GUILD_ID).setIcon(ICON_ONLINE)
+				.then(updated => console.log('Updated the guild icon to online'))
 				.catch (console.error);
-
+				
+				//Set last uploaded icon to online
 				lasticon = "online";
-			};
+			}
+		} else {
+			//Only upload offline icon when necessary
+			if (lasticon != "offline") {
+				discordclient.guilds.get(DISCORD_TARGET_GUILD_ID).setIcon(ICON_OFFLINE)
+				.then(updated => console.log('Updated the guild icon to offline'))
+				.catch (console.error);
+				
+				//Set last uploaded icon to offline
+				lasticon = "offline";
+			}
 		}
 
+	}, function (err) {
+		console.log(err);
 	});
-}
+};
